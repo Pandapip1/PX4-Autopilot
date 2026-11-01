@@ -31,11 +31,16 @@
 #
 ############################################################################
 
-px4_add_git_submodule(TARGET git_heatshrink PATH heatshrink)
+find_package(heatshrink QUIET)
+if (TARGET heatshrink::heatshrink)
+	add_library(heatshrink ALIAS heatshrink::heatshrink)
+else()
+	px4_add_git_submodule(TARGET git_heatshrink PATH heatshrink)
 
-px4_add_library(heatshrink
-	heatshrink/heatshrink_decoder.c
-)
+	px4_add_library(heatshrink
+		heatshrink/heatshrink_decoder.c
+	)
 
-target_compile_options(heatshrink PRIVATE
-	-DHEATSHRINK_DYNAMIC_ALLOC=0)
+	target_compile_options(heatshrink PRIVATE
+		-DHEATSHRINK_DYNAMIC_ALLOC=0)
+endif()
