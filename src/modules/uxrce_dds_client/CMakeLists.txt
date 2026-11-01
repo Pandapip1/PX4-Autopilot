@@ -35,105 +35,128 @@ if(${CMAKE_VERSION} VERSION_LESS_EQUAL "3.15")
 	message(WARNING "skipping uxrce_dds_client, Micro-XRCE-DDS-Client needs to be fixed to work with CMAKE_VERSION ${CMAKE_VERSION}")
 
 else()
+	# find_package() success only ever happens on a standalone/host build (e.g.
+	# a Nix package) that already has microxrcedds_client installed - no real
+	# embedded/cross-compiled board ever has it as a system package, so this
+	# path is unreachable there. Scoped to CONFIG_UXRCE_DDS_CLIENT_USE_DDS_V3
+	# only: that's the variant tracking eProsima's own upstream releases (the
+	# non-v3 submodule is a separate, more PX4-specific fork branch nothing
+	# here has been validated against).
 	if(CONFIG_UXRCE_DDS_CLIENT_USE_DDS_V3)
-		message(WARNING "Using Micro-XRCE-DDS-Client v3 for uxrce_dds_client module")
-		set(microxrceddsclient_src_dir   ${CMAKE_CURRENT_SOURCE_DIR}/Micro-XRCE-DDS-Client-v3)
+		find_package(microxrcedds_client 3.0.2 QUIET)
+	endif()
+
+	if (TARGET microxrcedds_client)
+		add_library(microxrceddsclient ALIAS microxrcedds_client)
+		set(microxrceddsclient_depends microxrceddsclient)
 	else()
-		set(microxrceddsclient_src_dir   ${CMAKE_CURRENT_SOURCE_DIR}/Micro-XRCE-DDS-Client)
+		if(CONFIG_UXRCE_DDS_CLIENT_USE_DDS_V3)
+			message(WARNING "Using Micro-XRCE-DDS-Client v3 for uxrce_dds_client module")
+			set(microxrceddsclient_src_dir   ${CMAKE_CURRENT_SOURCE_DIR}/Micro-XRCE-DDS-Client-v3)
+		else()
+			set(microxrceddsclient_src_dir   ${CMAKE_CURRENT_SOURCE_DIR}/Micro-XRCE-DDS-Client)
+		endif()
+		set(microxrceddsclient_build_dir ${CMAKE_CURRENT_BINARY_DIR})
+
+		# Upper bound for the UDP receive buffer
+		if(CONFIG_NET_ETH_PKTSIZE)
+			set(microxrceddsclient_udp_mtu_arg -DUCLIENT_UDP_TRANSPORT_MTU:STRING=${CONFIG_NET_ETH_PKTSIZE})
+		endif()
+
+		px4_add_git_submodule(TARGET git_micro_xrce_dds_client PATH "${microxrceddsclient_src_dir}")
+
+		# If a toolchain file is given, explicitly define its path when building the Micro-XRCE-DDS-CLient
+		if(CMAKE_TOOLCHAIN_FILE MATCHES "cmake$")
+			set(microxrceddsclient_toolchain ${CMAKE_TOOLCHAIN_FILE})
+		elseif(CMAKE_TOOLCHAIN_FILE)
+			set(microxrceddsclient_toolchain ${PX4_SOURCE_DIR}/platforms/${PX4_PLATFORM}/cmake/${CMAKE_TOOLCHAIN_FILE}.cmake)
+		endif()
+
+		# Include NuttX headers
+		get_property(include_dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
+		set(c_flags_with_includes "${CMAKE_C_FLAGS}")
+		set(cxx_flags_with_includes "${CMAKE_CXX_FLAGS}")
+		foreach(dir ${include_dirs})
+			set(c_flags_with_includes "${c_flags_with_includes} -I${dir}")
+			set(cxx_flags_with_includes "${cxx_flags_with_includes} -I${dir}")
+		endforeach()
+
+		set(lib_dir ${CMAKE_INSTALL_LIBDIR})
+		if("${lib_dir}" STREQUAL "")
+			set(lib_dir "lib")
+		endif()
+
+		if(PX4_PLATFORM STREQUAL "nuttx")
+			set(c_flags_with_includes "${c_flags_with_includes} -Wno-cast-align -D__PX4_NUTTX")
+		endif()
+
+		# Match UXRCE_DDS_CLIENT_UDP in uxrce_dds_client.h: NuttX targets without networking have no UDP transport
+		if(PX4_PLATFORM STREQUAL "nuttx" AND NOT CONFIG_NET)
+			set(uclient_profile_udp OFF)
+		else()
+			set(uclient_profile_udp ON)
+		endif()
+
+		include(ExternalProject)
+		ExternalProject_Add(
+			libmicroxrceddsclient_project
+			PREFIX      ${microxrceddsclient_build_dir}
+			SOURCE_DIR  ${microxrceddsclient_src_dir}
+			INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}
+			CMAKE_CACHE_ARGS
+				-DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}
+				-DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}
+				-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
+				-DCMAKE_C_FLAGS:STRING=${c_flags_with_includes}
+				-DCMAKE_CXX_FLAGS:STRING=${cxx_flags_with_includes}
+				-DCMAKE_EXE_LINKER_FLAGS:STRING=${CMAKE_EXE_LINKER_FLAGS}
+				-DUCLIENT_PIC:BOOL=OFF
+				-DUCLIENT_PROFILE_TCP:BOOL=OFF
+				-DUCLIENT_PROFILE_UDP:BOOL=${uclient_profile_udp}
+				${microxrceddsclient_udp_mtu_arg}
+				-DUCLIENT_PROFILE_SERIAL:BOOL=ON
+				-DUCLIENT_PROFILE_DISCOVERY:BOOL=OFF
+				-DUCLIENT_PROFILE_CUSTOM_TRANSPORT:BOOL=OFF
+				-DUCLIENT_PROFILE_MULTITHREAD:BOOL=OFF
+				-DUCLIENT_PROFILE_SHARED_MEMORY:BOOL=OFF
+				-DUCLIENT_PLATFORM_POSIX:BOOL=ON
+				-DUCLIENT_BUILD_MICROCDR:BOOL=ON
+				-DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}
+				-DCMAKE_PREFIX_PATH:PATH=${CMAKE_CURRENT_BINARY_DIR}
+				-DCMAKE_TOOLCHAIN_FILE:STRING=${microxrceddsclient_toolchain}
+			BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/${lib_dir}/libmicroxrcedds_client.a
+			BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/${lib_dir}/libmicrocdr.a
+			DEPENDS prebuild_targets git_micro_xrce_dds_client
+			LOG_CONFIGURE true
+			LOG_BUILD true
+			LOG_INSTALL true
+			LOG_OUTPUT_ON_FAILURE true
+		)
+
+		add_library(libmicroxrceddsclient STATIC IMPORTED GLOBAL)
+		set_target_properties(libmicroxrceddsclient
+			PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/${lib_dir}/libmicroxrcedds_client.a
+		)
+
+		add_library(libmicrocdr STATIC IMPORTED GLOBAL)
+		set_target_properties(libmicrocdr
+			PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/${lib_dir}/libmicrocdr.a
+		)
+
+		add_library(microxrceddsclient INTERFACE)
+		add_dependencies(microxrceddsclient libmicroxrceddsclient)
+		add_dependencies(microxrceddsclient libmicrocdr)
+		add_dependencies(microxrceddsclient libmicroxrceddsclient_project)
+		target_include_directories(microxrceddsclient INTERFACE ${microxrceddsclient_build_dir}/include)
+
+		set(microxrceddsclient_depends
+			git_micro_xrce_dds_client
+			libmicroxrceddsclient_project
+			microxrceddsclient
+			libmicroxrceddsclient
+			libmicrocdr
+		)
 	endif()
-	set(microxrceddsclient_build_dir ${CMAKE_CURRENT_BINARY_DIR})
-
-	# Upper bound for the UDP receive buffer
-	if(CONFIG_NET_ETH_PKTSIZE)
-		set(microxrceddsclient_udp_mtu_arg -DUCLIENT_UDP_TRANSPORT_MTU:STRING=${CONFIG_NET_ETH_PKTSIZE})
-	endif()
-
-	px4_add_git_submodule(TARGET git_micro_xrce_dds_client PATH "${microxrceddsclient_src_dir}")
-
-	# If a toolchain file is given, explicitly define its path when building the Micro-XRCE-DDS-CLient
-	if(CMAKE_TOOLCHAIN_FILE MATCHES "cmake$")
-		set(microxrceddsclient_toolchain ${CMAKE_TOOLCHAIN_FILE})
-	elseif(CMAKE_TOOLCHAIN_FILE)
-		set(microxrceddsclient_toolchain ${PX4_SOURCE_DIR}/platforms/${PX4_PLATFORM}/cmake/${CMAKE_TOOLCHAIN_FILE}.cmake)
-	endif()
-
-	# Include NuttX headers
-	get_property(include_dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
-	set(c_flags_with_includes "${CMAKE_C_FLAGS}")
-	set(cxx_flags_with_includes "${CMAKE_CXX_FLAGS}")
-	foreach(dir ${include_dirs})
-		set(c_flags_with_includes "${c_flags_with_includes} -I${dir}")
-		set(cxx_flags_with_includes "${cxx_flags_with_includes} -I${dir}")
-	endforeach()
-
-	set(lib_dir ${CMAKE_INSTALL_LIBDIR})
-	if("${lib_dir}" STREQUAL "")
-		set(lib_dir "lib")
-	endif()
-
-	if(PX4_PLATFORM STREQUAL "nuttx")
-		set(c_flags_with_includes "${c_flags_with_includes} -Wno-cast-align -D__PX4_NUTTX")
-	endif()
-
-	# Match UXRCE_DDS_CLIENT_UDP in uxrce_dds_client.h: NuttX targets without networking have no UDP transport
-	if(PX4_PLATFORM STREQUAL "nuttx" AND NOT CONFIG_NET)
-		set(uclient_profile_udp OFF)
-	else()
-		set(uclient_profile_udp ON)
-	endif()
-
-	include(ExternalProject)
-	ExternalProject_Add(
-		libmicroxrceddsclient_project
-		PREFIX      ${microxrceddsclient_build_dir}
-		SOURCE_DIR  ${microxrceddsclient_src_dir}
-		INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}
-		CMAKE_CACHE_ARGS
-			-DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}
-			-DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}
-			-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
-			-DCMAKE_C_FLAGS:STRING=${c_flags_with_includes}
-			-DCMAKE_CXX_FLAGS:STRING=${cxx_flags_with_includes}
-			-DCMAKE_EXE_LINKER_FLAGS:STRING=${CMAKE_EXE_LINKER_FLAGS}
-			-DUCLIENT_PIC:BOOL=OFF
-			-DUCLIENT_PROFILE_TCP:BOOL=OFF
-			-DUCLIENT_PROFILE_UDP:BOOL=${uclient_profile_udp}
-			${microxrceddsclient_udp_mtu_arg}
-			-DUCLIENT_PROFILE_SERIAL:BOOL=ON
-			-DUCLIENT_PROFILE_DISCOVERY:BOOL=OFF
-			-DUCLIENT_PROFILE_CUSTOM_TRANSPORT:BOOL=OFF
-			-DUCLIENT_PROFILE_MULTITHREAD:BOOL=OFF
-			-DUCLIENT_PROFILE_SHARED_MEMORY:BOOL=OFF
-			-DUCLIENT_PLATFORM_POSIX:BOOL=ON
-			-DUCLIENT_BUILD_MICROCDR:BOOL=ON
-			-DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}
-			-DCMAKE_PREFIX_PATH:PATH=${CMAKE_CURRENT_BINARY_DIR}
-			-DCMAKE_TOOLCHAIN_FILE:STRING=${microxrceddsclient_toolchain}
-		BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/${lib_dir}/libmicroxrcedds_client.a
-		BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/${lib_dir}/libmicrocdr.a
-		DEPENDS prebuild_targets git_micro_xrce_dds_client
-		LOG_CONFIGURE true
-		LOG_BUILD true
-		LOG_INSTALL true
-		LOG_OUTPUT_ON_FAILURE true
-	)
-
-	add_library(libmicroxrceddsclient STATIC IMPORTED GLOBAL)
-	set_target_properties(libmicroxrceddsclient
-		PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/${lib_dir}/libmicroxrcedds_client.a
-	)
-
-	add_library(libmicrocdr STATIC IMPORTED GLOBAL)
-	set_target_properties(libmicrocdr
-		PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/${lib_dir}/libmicrocdr.a
-	)
-
-	add_library(microxrceddsclient INTERFACE)
-	add_dependencies(microxrceddsclient libmicroxrceddsclient)
-	add_dependencies(microxrceddsclient libmicrocdr)
-	add_dependencies(microxrceddsclient libmicroxrceddsclient_project)
-	target_include_directories(microxrceddsclient INTERFACE ${microxrceddsclient_build_dir}/include)
-
 
 	add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dds_topics.h
 		COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_dds_topics.py
@@ -162,11 +185,7 @@ else()
 			srv_base.cpp
 			srv_base.h
 		DEPENDS
-			git_micro_xrce_dds_client
-			libmicroxrceddsclient_project
-			microxrceddsclient
-			libmicroxrceddsclient
-			libmicrocdr
+			${microxrceddsclient_depends}
 			timesync
 			topic_bridge_files
 			uorb_ucdr_headers
