@@ -31,59 +31,89 @@
 #
 ############################################################################
 
-px4_add_git_submodule(TARGET git_gps_devices PATH "devices")
+# find_package() success only ever happens on a standalone/host build (e.g.
+# a Nix package) that already has px4-gpsdrivers installed - cross-compile
+# toolchains set CMAKE_SYSTEM_NAME, so CMake's cross-compiling default
+# (CMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY) restricts find_package() to
+# CMAKE_FIND_ROOT_PATH there, making this path structurally unreachable on
+# a real embedded board. It links the package's single prebuilt
+# multi-driver library unconditionally, ignoring CONFIG_GPS_* - a deliberate
+# tradeoff, since the boards that care about per-driver flash size never
+# take this path to begin with.
+find_package(px4-gpsdrivers QUIET)
+if (TARGET px4-gpsdrivers::gps)
+	px4_add_module(
+		MODULE drivers__gps
+		MAIN gps
+		COMPILE_FLAGS
+			-Wno-stringop-overflow # due to https://gcc.gnu.org/bugzilla/show_bug.cgi?id=91707
+		SRCS
+			gps.cpp
+		MODULE_CONFIG
+			module.yaml
+			params.yaml
+		DEPENDS
+			px4-gpsdrivers::gps
+			gnss
+			failure_injection
+		)
+else()
+	px4_add_git_submodule(TARGET git_gps_devices PATH "devices")
 
-set(SRCS
-	gps.cpp
-	devices/src/gps_helper.cpp
-)
-
-if(CONFIG_GPS_UBX)
-	list(APPEND SRCS devices/src/ubx.cpp)
-endif()
-
-if(CONFIG_GPS_MTK)
-	list(APPEND SRCS devices/src/mtk.cpp)
-endif()
-
-if(CONFIG_GPS_ASHTECH)
-	list(APPEND SRCS devices/src/ashtech.cpp)
-endif()
-
-if(CONFIG_GPS_EMLIDREACH)
-	list(APPEND SRCS devices/src/emlid_reach.cpp)
-endif()
-
-if(CONFIG_GPS_FEMTOMES)
-	list(APPEND SRCS devices/src/femtomes.cpp)
-endif()
-
-if(CONFIG_GPS_NMEA)
-	list(APPEND SRCS devices/src/nmea.cpp devices/src/unicore.cpp)
-endif()
-
-# RTCM parsing (RTK base station corrections) shared by these receivers
-if(CONFIG_GPS_UBX OR CONFIG_GPS_ASHTECH OR CONFIG_GPS_FEMTOMES OR CONFIG_GPS_NMEA)
-	list(APPEND SRCS devices/src/rtcm.cpp)
-endif()
-
-# CRC helpers shared by Femtomes and Unicore (NMEA)
-if(CONFIG_GPS_FEMTOMES OR CONFIG_GPS_NMEA)
-	list(APPEND SRCS devices/src/crc.cpp)
-endif()
-
-px4_add_module(
-	MODULE drivers__gps
-	MAIN gps
-	COMPILE_FLAGS
-		-Wno-stringop-overflow # due to https://gcc.gnu.org/bugzilla/show_bug.cgi?id=91707
-	SRCS
-		${SRCS}
-	MODULE_CONFIG
-		module.yaml
-		params.yaml
-	DEPENDS
-		git_gps_devices
-		gnss
-		failure_injection
+	set(SRCS
+		gps.cpp
+		devices/src/gps_helper.cpp
 	)
+
+	if(CONFIG_GPS_UBX)
+		list(APPEND SRCS devices/src/ubx.cpp)
+	endif()
+
+	if(CONFIG_GPS_MTK)
+		list(APPEND SRCS devices/src/mtk.cpp)
+	endif()
+
+	if(CONFIG_GPS_ASHTECH)
+		list(APPEND SRCS devices/src/ashtech.cpp)
+	endif()
+
+	if(CONFIG_GPS_EMLIDREACH)
+		list(APPEND SRCS devices/src/emlid_reach.cpp)
+	endif()
+
+	if(CONFIG_GPS_FEMTOMES)
+		list(APPEND SRCS devices/src/femtomes.cpp)
+	endif()
+
+	if(CONFIG_GPS_NMEA)
+		list(APPEND SRCS devices/src/nmea.cpp devices/src/unicore.cpp)
+	endif()
+
+	# RTCM parsing (RTK base station corrections) shared by these receivers
+	if(CONFIG_GPS_UBX OR CONFIG_GPS_ASHTECH OR CONFIG_GPS_FEMTOMES OR CONFIG_GPS_NMEA)
+		list(APPEND SRCS devices/src/rtcm.cpp)
+	endif()
+
+	# CRC helpers shared by Femtomes and Unicore (NMEA)
+	if(CONFIG_GPS_FEMTOMES OR CONFIG_GPS_NMEA)
+		list(APPEND SRCS devices/src/crc.cpp)
+	endif()
+
+	px4_add_module(
+		MODULE drivers__gps
+		MAIN gps
+		COMPILE_FLAGS
+			-Wno-stringop-overflow # due to https://gcc.gnu.org/bugzilla/show_bug.cgi?id=91707
+		SRCS
+			${SRCS}
+		INCLUDES
+			devices/src
+		MODULE_CONFIG
+			module.yaml
+			params.yaml
+		DEPENDS
+			git_gps_devices
+			gnss
+			failure_injection
+		)
+endif()

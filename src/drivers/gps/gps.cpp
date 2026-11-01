@@ -73,25 +73,25 @@
 #include <lib/gnss/correction_injector.h>
 #include <systemlib/system_time_source.h>
 
-#include "devices/src/gps_helper.h"
+#include <gps_helper.h>
 
 #if defined(CONFIG_GPS_UBX)
-# include "devices/src/ubx.h"
+# include <ubx.h>
 #endif
 #if defined(CONFIG_GPS_MTK)
-# include "devices/src/mtk.h"
+# include <mtk.h>
 #endif
 #if defined(CONFIG_GPS_ASHTECH)
-# include "devices/src/ashtech.h"
+# include <ashtech.h>
 #endif
 #if defined(CONFIG_GPS_EMLIDREACH)
-# include "devices/src/emlid_reach.h"
+# include <emlid_reach.h>
 #endif
 #if defined(CONFIG_GPS_FEMTOMES)
-# include "devices/src/femtomes.h"
+# include <femtomes.h>
 #endif
 #if defined(CONFIG_GPS_NMEA)
-# include "devices/src/nmea.h"
+# include <nmea.h>
 #endif
 
 #ifdef __PX4_LINUX
