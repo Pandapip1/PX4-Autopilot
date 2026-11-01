@@ -68,14 +68,14 @@
 #include <uORB/topics/sensor_gnss_relative.h>
 
 #ifndef CONSTRAINED_FLASH
-# include "devices/src/ashtech.h"
-# include "devices/src/emlid_reach.h"
-# include "devices/src/mtk.h"
-# include "devices/src/femtomes.h"
-# include "devices/src/nmea.h"
+# include <ashtech.h>
+# include <emlid_reach.h>
+# include <mtk.h>
+# include <femtomes.h>
+# include <nmea.h>
 
 #endif // CONSTRAINED_FLASH
-#include "devices/src/ubx.h"
+#include <ubx.h>
 
 #ifdef __PX4_LINUX
 #include <linux/spi/spidev.h>

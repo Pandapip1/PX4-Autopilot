@@ -31,15 +31,15 @@
 #
 ############################################################################
 
-px4_add_git_submodule(TARGET git_gps_devices PATH "devices")
-
-px4_add_module(
-	MODULE drivers__gps
-	MAIN gps
-	COMPILE_FLAGS
-		-Wno-stringop-overflow # due to https://gcc.gnu.org/bugzilla/show_bug.cgi?id=91707
-	SRCS
-		gps.cpp
+find_package(px4-gpsdrivers QUIET)
+if(TARGET px4-gpsdrivers::gps)
+	set(drivers_gps_extra_includes)
+	set(drivers_gps_extra_srcs)
+	set(drivers_gps_extra_deps px4-gpsdrivers::gps)
+else()
+	px4_add_git_submodule(TARGET git_gps_devices PATH "devices")
+	set(drivers_gps_extra_includes devices/src)
+	set(drivers_gps_extra_srcs
 		devices/src/crc.cpp
 		devices/src/gps_helper.cpp
 		devices/src/mtk.cpp
@@ -51,8 +51,22 @@ px4_add_module(
 		devices/src/nmea.cpp
 		devices/src/unicore.cpp
 		devices/src/crc.cpp
+	)
+	set(drivers_gps_extra_deps git_gps_devices)
+endif()
+
+px4_add_module(
+	MODULE drivers__gps
+	MAIN gps
+	COMPILE_FLAGS
+		-Wno-stringop-overflow # due to https://gcc.gnu.org/bugzilla/show_bug.cgi?id=91707
+	INCLUDES
+		${drivers_gps_extra_includes}
+	SRCS
+		gps.cpp
+		${drivers_gps_extra_srcs}
 	MODULE_CONFIG
 		module.yaml
 	DEPENDS
-		git_gps_devices
+		${drivers_gps_extra_deps}
 	)
